@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>무신사 랭킹</title>
+</head>
+<body>
+<h1>🔥 무신사 실시간 랭킹</h1>
+<div style="display: flex; gap: 20px; flex-wrap: wrap;">
+    <div th:each="item : ${items}" style="border:1px solid #ccc; padding:10px; width:200px;">
+        <h3 style="color:red;" th:text="${item.rank} + '위'"></h3>
+        <img th:src="${item.imgUrl}" width="100%">
+        <p><b>[<span th:text="${item.brand}"></span>]</b></p>
+        <p th:text="${item.title}"></p>
+        <p th:text="${item.price}"></p>
+    </div>
+</div>
+</body>
+</html>

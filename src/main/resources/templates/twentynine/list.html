@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>29CM AI 크롤링 확인</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; background: #f0f2f5; padding: 20px; margin: 0; }
+
+        /* 상단 헤더 */
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { color: #333; margin-bottom: 10px; }
+        .btn-crawl {
+            background-color: #000; color: white; padding: 10px 20px;
+            text-decoration: none; border-radius: 5px; font-weight: bold;
+            display: inline-block; transition: 0.3s;
+        }
+        .btn-crawl:hover { background-color: #333; }
+
+        /* 그리드 레이아웃 */
+        .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 25px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* 카드 스타일 */
+        .card {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+            transition: transform 0.2s;
+        }
+        .card:hover { transform: translateY(-5px); }
+
+        /* 정보 영역 */
+        .info { padding: 15px; border-bottom: 1px solid #eee; }
+        .brand { font-size: 13px; color: #666; font-weight: 700; margin-bottom: 4px; }
+        .title { font-size: 15px; color: #333; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .price { font-size: 16px; color: #ff5000; font-weight: 800; }
+        .p-no { font-size: 11px; color: #aaa; margin-top: 5px; }
+
+        /* 이미지 비교 영역 */
+        .img-row { display: flex; height: 280px; }
+        .img-box { flex: 1; position: relative; border-right: 1px solid #f0f0f0; background: #fafafa; }
+        .img-box:last-child { border-right: none; }
+
+        .img-box img { width: 100%; height: 100%; object-fit: cover; }
+
+        /* 라벨 (옷 vs 모델) */
+        .badge {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            text-align: center; color: white; font-size: 12px;
+            padding: 6px; font-weight: bold;
+            backdrop-filter: blur(2px);
+        }
+        .empty-msg {
+            display: flex; justify-content: center; align-items: center;
+            height: 100%; color: #bbb; font-size: 13px; text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>🧥 29CM AI 크롤링 데이터 (DB 저장됨)</h1>
+    <p>총 <strong><span th:text="${count}">0</span></strong>개의 상품이 수집되었습니다.</p>
+
+    <a href="/29cm/crawl" class="btn-crawl">🔄 데이터 새로 가져오기 (크롤링 실행)</a>
+</div>
+
+<div th:if="${count == 0}" style="text-align:center; padding:50px; color:#666;">
+    <h3 style="margin-bottom:10px;">저장된 데이터가 없습니다.</h3>
+    <p>위의 <strong>[데이터 새로 가져오기]</strong> 버튼을 눌러주세요.</p>
+</div>
+
+<div class="container">
+    <div class="card" th:each="p : ${products}">
+        <div class="info">
+            <div class="brand" th:text="${'[' + p.source + '] ' + p.brand}">브랜드</div>
+            <div class="title" th:text="${p.title}">상품명</div>
+            <div class="price" th:text="${#numbers.formatInteger(p.price, 0, 'COMMA') + '원'}">가격</div>
+            <div class="p-no">품번: <span th:text="${p.productNo}"></span></div>
+        </div>
+
+        <div class="img-row">
+            <div class="img-box">
+                <img th:if="${p.clothImg != null}" th:src="${p.clothImg}" alt="옷">
+                <div th:unless="${p.clothImg != null}" class="empty-msg">이미지 없음</div>
+                <div class="badge" style="background: rgba(0, 0, 255, 0.7);">👕 옷 (Cloth)</div>
+            </div>
+
+            <div class="img-box">
+                <img th:if="${p.modelImg != null and p.modelImg != ''}" th:src="${p.modelImg}" alt="모델">
+                <div th:unless="${p.modelImg != null and p.modelImg != ''}" class="empty-msg">
+                    모델샷 없음<br>(AI 미탐지)
+                </div>
+                <div class="badge" style="background: rgba(255, 0, 0, 0.7);">💃 모델 (Model)</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
