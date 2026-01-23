@@ -5,20 +5,24 @@ import io
 import time
 import re
 
+# 1. 한글 깨짐 방지
 sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
 def parse_korean_number(text):
+    """ '9.2만' -> 92000, '6,159개' -> 6159 변환 """
     if not text: return 0
     text = str(text).strip()
-    text = text.replace(',', '')
     multiplier = 1
+    
     if '만' in text:
         multiplier = 10000
         text = text.replace('만', '')
     elif '천' in text:
         multiplier = 1000
         text = text.replace('천', '')
+    
+    # 숫자와 점(.)만 남기고 제거 (콤마, '개', '후기' 등 제거)
     clean_num = re.sub(r"[^0-9.]", "", text)
     if clean_num:
         try:
@@ -29,17 +33,17 @@ def parse_korean_number(text):
 
 def run():
     results = []
-    # 랭킹 페이지
-    RANKING_URL = "https://www.musinsa.com/main/musinsa/ranking?gf=A"
+    
+    # ✅ 상의(Top) 랭킹 URL
+    RANKING_URL = "https://www.musinsa.com/main/musinsa/ranking?gf=A&storeCode=musinsa&sectionId=200&contentsId=&categoryCode=001000&ageBand=AGE_BAND_ALL&subPan=product"
 
-    print(">> [무신사] 패턴 매칭 크롤링 시작...")
+    print(">> [무신사] 구조 기반 정밀 크롤링 시작 (상의 TOP 20)...")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False) # 브라우저 뜨는거 확인
-        context = browser.new_context(viewport={"width": 1920, "height": 1080})
-        page = context.new_page()
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
 
-        # 1. 랭킹 진입
+        # 1. 랭킹 페이지 접속
         page.goto(RANKING_URL, timeout=60000)
         time.sleep(3)
 
@@ -47,17 +51,18 @@ def run():
         items_data = page.evaluate("""() => {
             const data = [];
             const links = Array.from(document.querySelectorAll("a"));
+            // 상품 링크만 필터링
             const productLinks = links.filter(a => 
                 (a.href.includes('/goods/') || a.href.includes('/products/')) && 
                 !a.href.includes('reviews')
             );
-            productLinks.slice(0, 15).forEach(a => {
+            productLinks.slice(0, 30).forEach(a => {
                data.push({ href: a.href }); 
             });
             return data;
         }""")
 
-        # 중복 제거
+        # 중복 제거 및 20개 제한
         target_items = []
         seen = set()
         for item in items_data:
@@ -65,123 +70,103 @@ def run():
             if url not in seen:
                 seen.add(url)
                 target_items.append(item)
-            if len(target_items) >= 10: break
-
+            if len(target_items) >= 20: break
+        
         print(f">> 수집 대상: {len(target_items)}개")
 
         # 3. 상세 페이지 순회
         for idx, item in enumerate(target_items):
             try:
-                print(f">> [{idx+1}] 접속: {item['href']}")
+                print(f">> [{idx+1}/20] 이동: {item['href']}")
                 page.goto(item['href'], timeout=60000)
-
-                # 🔥 [중요] 데이터 로딩 대기 (좋아요/후기 로딩 시간 줌)
-                time.sleep(4)
-
-                # 스크롤 살짝 내려서 이미지/데이터 로딩 유도
-                page.mouse.wheel(0, 1000)
-                time.sleep(1)
+                time.sleep(1.5) # 로딩 대기
 
                 # ---------------------------------------------------
-                # 🕵️‍♀️ 1. 기본 정보 (메타태그 - 가장 정확함)
+                # 🕵️‍♀️ [핵심 전략] 보내주신 HTML 태그 정밀 타격
                 # ---------------------------------------------------
-                meta_info = page.evaluate("""() => {
-                    const getMeta = (prop) => {
-                        const el = document.querySelector(`meta[property="${prop}"]`);
-                        return el ? el.content : "";
-                    };
-                    return {
-                        brand: getMeta('product:brand'),
-                        title: getMeta('og:title'),
-                        price: getMeta('product:price:amount'),
-                        img: getMeta('og:image')
-                    };
-                }""")
-
-                # ---------------------------------------------------
-                # 🕵️‍♀️ 2. 통계 정보 (전체 텍스트에서 정규식으로 추출)
-                # ---------------------------------------------------
-                # 페이지의 모든 텍스트를 가져와서 파이썬에서 분석합니다.
-                full_text = page.evaluate("document.body.innerText")
-
-                # (1) 좋아요 찾기
-                # 패턴: 줄바꿈 혹은 공백 뒤에 숫자+만/천 패턴이 있는지 확인
-                # 무신사 좋아요는 보통 하트 아이콘 근처에 있지만 텍스트로는 숫자만 덩그러니 있는 경우가 많음
-                # 정확도를 위해 '좋아요' 텍스트가 포함된 버튼의 텍스트를 우선적으로 가져오도록 JS 실행
-                like_raw = page.evaluate("""() => {
-                    // 1. '좋아요' 단어가 포함된 요소 찾기
-                    const likes = Array.from(document.querySelectorAll('*'))
-                        .filter(el => el.innerText && el.innerText.includes('좋아요') && el.innerText.length < 30)
-                        .map(el => el.innerText);
+                extracted = page.evaluate("""() => {
+                    // 1. 평점 & 후기 찾기
+                    // 힌트: <div ... data-button-id="review">
+                    let rating = "0";
+                    let reviewCountTxt = "0";
                     
-                    // 2. 만약 없다면 class에 like가 들어간 요소의 숫자 찾기
-                    if (likes.length === 0) {
-                         const likeClass = Array.from(document.querySelectorAll('[class*="like"]'))
-                            .filter(el => el.innerText && el.innerText.match(/[0-9]/) && el.innerText.length < 10)
-                            .map(el => el.innerText);
-                         return likeClass[0] || "0";
+                    const reviewBox = document.querySelector("div[data-button-id='review']");
+                    if (reviewBox) {
+                        const spans = reviewBox.querySelectorAll("span");
+                        // 첫 번째 span: 평점 (4.8)
+                        if (spans.length > 0) rating = spans[0].innerText;
+                        // 두 번째 span: 후기 개수 (후기 6,159개)
+                        if (spans.length > 1) reviewCountTxt = spans[1].innerText;
                     }
-                    return likes[0] || "0";
+
+                    // 2. 좋아요 찾기
+                    // 힌트: <svg ... data-mds="IcBoldLike"> 가 있는 곳 옆의 텍스트
+                    let likes = "0";
+                    // 아이콘을 먼저 찾음
+                    const likeIcon = document.querySelector("svg[data-mds='IcBoldLike']");
+                    
+                    if (likeIcon) {
+                        // 아이콘의 부모(버튼)의 부모(div) 전체 텍스트를 가져오거나
+                        // 아이콘 근처의 span을 찾음
+                        // 가장 확실한 방법: 아이콘이 포함된 가장 가까운 컨테이너 div를 찾고 그 안의 텍스트 추출
+                        const container = likeIcon.closest("div"); // <div class="Like__Container...">
+                        if (container) {
+                            likes = container.innerText; 
+                        }
+                    }
+
+                    // 3. 메타 정보 (제목, 가격, 이미지)
+                    const getMeta = (p) => document.querySelector(`meta[property="${p}"]`)?.content || "";
+                    
+                    return {
+                        title: getMeta('og:title'),
+                        brand: getMeta('product:brand'),
+                        img: getMeta('og:image'),
+                        price: getMeta('product:price:amount'),
+                        rating: rating,
+                        reviews: reviewCountTxt,
+                        likes: likes
+                    };
                 }""")
 
-                # (2) 별점 찾기 (텍스트에서 "4.8" "4.9" 같은 패턴 찾기)
-                # ★ 모양이 있거나 점수가 있는 패턴
-                rating = 0.0
-                rating_match = re.search(r'([3-5])\.([0-9])', full_text) # 3.0 ~ 5.9 사이 숫자 검색
-                if rating_match:
-                    rating = float(rating_match.group(0))
+                # 4. 데이터 정제 (Python)
+                final_rating = 0.0
+                try:
+                    final_rating = float(extracted['rating'])
+                except:
+                    pass
 
-                # (3) 후기 수 찾기 ("후기 1,234" 또는 "후기 1.2만")
-                review_cnt = 0
-                # "후기" 라는 글자 뒤에 나오는 숫자 찾기
-                review_match = re.search(r'후기\s*([0-9,만천]+)', full_text)
-                if review_match:
-                    review_cnt = parse_korean_number(review_match.group(1))
-                else:
-                    # 못 찾았으면 숫자+개 패턴 ("2,392개")
-                    review_match2 = re.search(r'([0-9,]+)개', full_text)
-                    if review_match2:
-                        review_cnt = parse_korean_number(review_match2.group(1))
-
-                # --- 데이터 정리 ---
-                price = int(float(meta_info['price'])) if meta_info['price'] else 0
-                brand = meta_info['brand'] if meta_info['brand'] else "무신사"
-                title = meta_info['title'] if meta_info['title'] else "제목 없음"
-
-                # 좋아요 숫자 정제
-                like_cnt = parse_korean_number(like_raw)
-
-                # 후기가 0이면 혹시 모르니 rating도 의심 (둘 다 없으면 신상품일수도)
-                if review_cnt == 0 and rating == 0:
-                    # 안전장치: 전체 텍스트에서 (123) 처럼 괄호 안 숫자 찾기 (댓글수일 확률 높음)
-                    backup_match = re.search(r'\(([0-9,]+)\)', full_text)
-                    if backup_match:
-                        review_cnt = parse_korean_number(backup_match.group(1))
+                final_likes = parse_korean_number(extracted['likes'])
+                final_reviews = parse_korean_number(extracted['reviews'])
+                price_int = int(extracted['price']) if extracted['price'] else 0
+                brand_name = extracted['brand'] if extracted['brand'] else "무신사"
 
                 data = {
                     "ranking": idx + 1,
-                    "brand": brand,
-                    "title": title,
-                    "price": price,
-                    "imgUrl": meta_info['img'],
-                    "subImgUrl": meta_info['img'],
-                    "category": "의류",
-                    "likeCount": like_cnt,
-                    "rating": rating,
-                    "reviewCount": review_cnt
+                    "brand": brand_name,
+                    "title": extracted['title'],
+                    "price": price_int,
+                    "imgUrl": extracted['img'],
+                    "subImgUrl": extracted['img'],
+                    "category": "상의", 
+                    "likeCount": final_likes,
+                    "rating": final_rating,
+                    "reviewCount": final_reviews 
                 }
-
+                
                 results.append(data)
-                print(f"   -> [확인] ❤️{like_cnt} | ★{rating} | 📝{review_cnt} | {title[:10]}")
+                print(f"   -> [성공] ❤️{final_likes} | ★{final_rating} | 📝{final_reviews} | {extracted['title'][:10]}...")
 
             except Exception as e:
-                print(f"   -> ❌ 에러: {e}")
+                print(f"   -> ❌ 실패: {e}")
 
         browser.close()
 
-    print(f">> 최종 {len(results)}건 저장.")
-    with open("python/musinsa_data.json", "w", encoding="utf-8") as f:
+    # 5. 저장
+    with open("python/musinsa_data_tag.json", "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=4)
+    
+    print(f">> 최종 {len(results)}건 저장 완료.")
 
 if __name__ == "__main__":
     run()
