@@ -21,12 +21,11 @@ public class MusinsaService {
     private final MusinsaRepository musinsaRepository;
 
     public void crawlAndSave() {
-        // 1. 파이썬 가상환경 경로 (본인 컴퓨터 환경에 맞게 유지)
-        String pythonPath = "C:\\Users\\user\\miniconda3\\envs\\crawling\\python.exe";
+       
+        String pythonPath = "python"; 
 
-        // ✨ 변경됨: 파일명 musinsa.py
-        String scriptPath = "python/musinsa.py";
-
+        // 2. 실행할 파이썬 스크립트의 '절대 경로' (상대 경로보다 안전함)
+        String scriptPath = "C:\\teamproject\\crawler\\python\\musinsa.py";
         try {
             System.out.println("🐍 [무신사] 파이썬 크롤링 시작...");
 

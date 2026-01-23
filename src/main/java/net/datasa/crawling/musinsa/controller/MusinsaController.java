@@ -18,7 +18,7 @@ public class MusinsaController {
 
     private final MusinsaService musinsaService;
 
-    // 접속 주소: http://localhost:8080/musinsa/crawl
+    // 접속 주소: http://localhost:9999/musinsa/crawl
     @GetMapping("/crawl")
     public String doCrawl() {
         musinsaService.crawlAndSave();
