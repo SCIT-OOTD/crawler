@@ -1,0 +1,20 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: mysql-container
+    restart: always
+    ports:
+      - "3308:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: 1234
+      MYSQL_DATABASE: musinsa_db
+      MYSQL_USER: musinsa
+      MYSQL_PASSWORD: 1234
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
