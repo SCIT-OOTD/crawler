@@ -1,0 +1,8 @@
+playwright
+pymysql
+cryptography
+sqlalchemy
+fastapi
+uvicorn
+pydantic
+requests

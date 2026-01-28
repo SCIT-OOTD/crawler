@@ -1,20 +1,35 @@
+version: '3.8'
+
 services:
-  db:
+  # 1. 우리가 쓰던 MySQL (기존 유지)
+  mysql-db:
     image: mysql:8.0
-    container_name: mysql-container
-    restart: always
+    container_name: ootd-db
     ports:
-      - "3308:3306"
+      - "3306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: 1234
       MYSQL_DATABASE: musinsa_db
-      MYSQL_USER: musinsa
-      MYSQL_PASSWORD: 1234
+      MYSQL_TZ: Asia/Seoul
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
-      - ./mysql_data:/var/lib/mysql
-    networks:
-      - backend
+      - db_data:/var/lib/mysql
+    networks:      # 👈 네트워크 추가
+      - ootd-net
 
+  # 2. 새로 추가한 파이썬 크롤러 (New!)
+  crawler:
+    build: .             # 현재 폴더의 Dockerfile로 빌드해라
+    container_name: ootd-crawler
+    depends_on:          # DB가 켜진 뒤에 실행해라
+      - mysql-db
+    networks:            # 같은 네트워크 써라 (그래야 서로 이름으로 부름)
+      - ootd-net
+
+# 서로 통신하기 위한 가상 랜선(네트워크)
 networks:
-  backend:
+  ootd-net:
     driver: bridge
+
+volumes:
+  db_data:
