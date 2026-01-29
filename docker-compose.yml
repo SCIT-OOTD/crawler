@@ -1,35 +1,47 @@
-version: '3.8'
+
 
 services:
-  # 1. 우리가 쓰던 MySQL (기존 유지)
-  mysql-db:
+  # 1. MySQL 데이터베이스
+  db:
     image: mysql:8.0
-    container_name: ootd-db
-    ports:
-      - "3306:3306"
+    container_name: mysql-container
     environment:
       MYSQL_ROOT_PASSWORD: 1234
       MYSQL_DATABASE: musinsa_db
-      MYSQL_TZ: Asia/Seoul
+      TZ: Asia/Seoul
+    ports:
+      - "3307:3306"
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    # 👇 [추가됨] DB가 진짜 켜졌는지 2초마다 검사하는 설정
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 2. FastAPI (파이썬 서버)
+  api:
+    build: .
+    container_name: ootd-api
+    ports:
+      - "8000:8000"
+    environment:
+      # 👇 DB 주소가 'db' 인지 'mysql-container' 인지 확인하세요. 
+      # (여기서는 서비스 이름인 'db'를 씁니다.)
+      DATABASE_URL: mysql+pymysql://root:1234@db:3306/ootd_db
+    # 👇 [추가됨] "DB가 건강해질 때까지 기다렸다가 켜져라!"
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      - db_data:/var/lib/mysql
-    networks:      # 👈 네트워크 추가
-      - ootd-net
+      - .:/app
 
-  # 2. 새로 추가한 파이썬 크롤러 (New!)
+  # 3. 크롤러 (api와 동일하게 DB 기다림)
   crawler:
-    build: .             # 현재 폴더의 Dockerfile로 빌드해라
+    build: .
     container_name: ootd-crawler
-    depends_on:          # DB가 켜진 뒤에 실행해라
-      - mysql-db
-    networks:            # 같은 네트워크 써라 (그래야 서로 이름으로 부름)
-      - ootd-net
-
-# 서로 통신하기 위한 가상 랜선(네트워크)
-networks:
-  ootd-net:
-    driver: bridge
-
-volumes:
-  db_data:
+    environment:
+      DATABASE_URL: mysql+pymysql://root:1234@db:3306/ootd_db
+    depends_on:
+      db:
+        condition: service_healthy
