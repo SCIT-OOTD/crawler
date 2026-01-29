@@ -4,12 +4,12 @@ import time
 import re
 import pymysql
 
-# 1. DB 설정 (도커 컨테이너 이름 확인 필수!)
+# 1. DB 설정 (docker 폴더의 docker-compose 사용)
 db_config = {
     'host': 'ootd-db',   # docker-compose의 서비스 이름
     'user': 'root',
-    'password': '1234',  # docker-compose의 MYSQL_ROOT_PASSWORD와 일치해야 함
-    'database': 'musinsa_db',
+    'password': '0000',  # docker-compose의 MYSQL_ROOT_PASSWORD와 일치해야 함
+    'database': 'ootd',  # 통합 DB명
     'port': 3306,
     'charset': 'utf8mb4',
     'cursorclass': pymysql.cursors.DictCursor
