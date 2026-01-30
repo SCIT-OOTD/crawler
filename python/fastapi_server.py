@@ -16,10 +16,10 @@ app = FastAPI()
 # =========================================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 모든 곳에서 접속 허용
+    allow_origins=["*"],      # 모든 곳에서 오는 요청 허용 (보안 해제)
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],      # 모든 종류의 요청(GET, POST 등) 허용
+    allow_headers=["*"],      # 모든 헤더 허용
 )
 # =========================================================
 

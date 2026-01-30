@@ -8,33 +8,16 @@ import pymysql
 db_config = {
     'host': 'mysql-container',   # docker-compose 서비스 이름
     'user': 'root',
-    'password': '1234',          # docker-compose 비번 일치 확인
-    'database': 'musinsa_db',    # DB 이름 일치 확인
+    'password': '1234',
+    'database': 'musinsa_db',
     'port': 3306,
     'charset': 'utf8mb4',
     'cursorclass': pymysql.cursors.DictCursor
 }
 
-def parse_korean_number(text):
-    if not text: return 0
-    text = str(text).strip()
-    multiplier = 1
-    if '만' in text:
-        multiplier = 10000
-        text = text.replace('만', '')
-    elif '천' in text:
-        multiplier = 1000
-        text = text.replace('천', '')
-    clean_num = re.sub(r"[^0-9.]", "", text)
-    if clean_num:
-        try:
-            return int(float(clean_num) * multiplier)
-        except:
-            return 0
-    return 0
-
 def scrape_musinsa():
     total_results = []
+    # 카테고리 정의
     CATEGORY_URLS = {
         "상의": "https://www.musinsa.com/main/musinsa/ranking?gf=A&storeCode=musinsa&sectionId=200&categoryCode=001000",
         "하의": "https://www.musinsa.com/main/musinsa/ranking?gf=A&storeCode=musinsa&sectionId=200&categoryCode=003000",
@@ -42,24 +25,69 @@ def scrape_musinsa():
         "아우터": "https://www.musinsa.com/main/musinsa/ranking?gf=A&storeCode=musinsa&sectionId=200&categoryCode=002000"
     }
 
-    print(">> [무신사] 통합 크롤링 시작...", flush=True)
+    print(">> [무신사] 대규모 크롤링 시작 (카테고리별 100개)...", flush=True)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        # 100개 긁는 동안 타임아웃 나지 않게 설정
+        context = browser.new_context(viewport={"width": 1920, "height": 1080})
+        page = context.new_page()
+        page.set_default_timeout(60000) # 60초
 
         for cat_name, cat_url in CATEGORY_URLS.items():
-            print(f"\n>> 🚀 [{cat_name}] 수집 시작...", flush=True)
+            print(f"\n>> 🚀 [{cat_name}] 리스트 확보 시작...", flush=True)
             try:
-                page.goto(cat_url, timeout=60000)
+                page.goto(cat_url)
                 time.sleep(2)
 
-                # 스크롤
-                for _ in range(3): 
-                    page.keyboard.press("PageDown")
-                    time.sleep(1)
-                
-                # 링크 수집
+                # ---------------------------------------------------------
+                # [핵심] 100개 모일 때까지 스크롤 내리기 (강력한 로직)
+                # ---------------------------------------------------------
+                target_count = 100
+                prev_count = 0
+                scroll_attempts = 0
+                max_attempts = 30  # 최대 30번 스크롤 시도
+
+                while True:
+                    # 현재 화면에 로딩된 상품 링크 개수 세기 (중복 제거 전 단순 개수)
+                    # 무신사는 한 상품에 링크가 여러 개일 수 있어서 넉넉하게 봅니다.
+                    page.keyboard.press("End")
+                    time.sleep(1.5) # 로딩 대기
+
+                    # 실제 유니크한 상품 링크 개수 계산
+                    unique_count = page.evaluate("""() => {
+                        const links = Array.from(document.querySelectorAll("a"));
+                        const goodsLinks = links
+                            .map(a => a.href)
+                            .filter(href => (href.includes('/goods/') || href.includes('/products/')) && !href.includes('reviews'));
+                        
+                        // 주소에서 ? 뒤에 파라미터 떼고 중복 제거해서 숫자 세기
+                        const uniqueSet = new Set(goodsLinks.map(url => url.split('?')[0]));
+                        return uniqueSet.size;
+                    }""")
+                    
+                    print(f"   Now: 상품 {unique_count}개 발견... (스크롤 중)", flush=True)
+
+                    if unique_count >= target_count:
+                        print(f"   ✅ 목표 달성! ({unique_count}개)")
+                        break
+                    
+                    if unique_count == prev_count:
+                        scroll_attempts += 1
+                        if scroll_attempts >= 5: # 5번 연속으로 개수가 안 늘어나면 끝으로 간주
+                            print("   ⚠️ 더 이상 상품이 없습니다.")
+                            break
+                    else:
+                        scroll_attempts = 0 # 개수가 늘어났으면 카운트 초기화
+                    
+                    prev_count = unique_count
+                    
+                    if scroll_attempts > max_attempts:
+                        break
+
+                # ---------------------------------------------------------
+                # 링크 추출
+                # ---------------------------------------------------------
                 items_data = page.evaluate("""() => {
                     const data = [];
                     const links = Array.from(document.querySelectorAll("a"));
@@ -67,12 +95,11 @@ def scrape_musinsa():
                         (a.href.includes('/goods/') || a.href.includes('/products/')) && 
                         !a.href.includes('reviews')
                     );
-                    // 테스트를 위해 5개만 수집
-                    productLinks.slice(0, 5).forEach(a => { data.push({ href: a.href }); });
+                    productLinks.forEach(a => { data.push({ href: a.href }); });
                     return data;
                 }""")
 
-                # 중복 제거
+                # 파이썬에서 중복 제거하고 100개 자르기
                 target_items = []
                 seen = set()
                 for item in items_data:
@@ -80,51 +107,37 @@ def scrape_musinsa():
                     if url not in seen:
                         seen.add(url)
                         target_items.append(item)
+                
+                # 딱 100개만 남기기
+                target_items = target_items[:100]
+                print(f"   - 실제 수집할 링크: {len(target_items)}개")
 
-                # 상세 페이지 이동
+                # ---------------------------------------------------------
+                # 상세 페이지 순회
+                # ---------------------------------------------------------
                 for idx, item in enumerate(target_items):
                     try:
-                        page.goto(item['href'], timeout=60000)
-                        time.sleep(1) 
+                        page.goto(item['href'])
+                        time.sleep(0.5) 
 
-                        # ▼ [수정됨] 상세 정보(후기, 평점, 좋아요) 긁어오는 로직 추가
                         extracted = page.evaluate("""() => {
-                            // 1. 기본 메타 정보 (제목, 브랜드, 이미지, 가격)
                             const getMeta = (p) => document.querySelector(`meta[property="${p}"]`)?.content || "";
-                            
-                            // 2. [사용자 제보 기반] 정확한 태그 찾기
                             const spans = Array.from(document.querySelectorAll('span'));
 
-                            // (1) 후기 찾기: "후기"라는 글자가 있고 + 회색 글씨(text-gray-600)인 것
-                            // 예: <span class="... text-gray-600 ...">후기 11개</span>
+                            // 후기
                             let reviewCnt = 0;
                             const reviewEl = spans.find(el => el.innerText.includes('후기') && el.className.includes('text-gray-600'));
-                            if (reviewEl) {
-                                reviewCnt = parseInt(reviewEl.innerText.replace(/[^0-9]/g, '')) || 0;
-                            }
+                            if (reviewEl) reviewCnt = parseInt(reviewEl.innerText.replace(/[^0-9]/g, '')) || 0;
 
-                            // (2) 평점 찾기: 검은 글씨(text-black)이면서 + 소수점(.)이 있는 숫자
-                            // 예: <span class="... text-black ...">4.9</span>
+                            // 평점
                             let ratingVal = 0.0;
-                            const ratingEl = spans.find(el => 
-                                el.className.includes('text-black') && 
-                                /^[0-5]\.\d$/.test(el.innerText.trim()) // "4.9" 같은 형태인지 확인
-                            );
-                            if (ratingEl) {
-                                ratingVal = parseFloat(ratingEl.innerText) || 0.0;
-                            }
+                            const ratingEl = spans.find(el => el.className.includes('text-black') && /^[0-5]\\.\\d$/.test(el.innerText.trim()));
+                            if (ratingEl) ratingVal = parseFloat(ratingEl.innerText) || 0.0;
 
-                            // (3) 좋아요 수 찾기: "text-body_13px_med" 클래스이면서 + 그냥 정수 숫자만 있는 것
-                            // (평점은 소수점이 있어서 제외되고, 후기는 글자가 있어서 제외됨)
+                            // 좋아요
                             let likeCnt = 0;
-                            const likeEl = spans.find(el => 
-                                el.className.includes('text-body_13px_med') &&   // 폰트 클래스 일치
-                                !el.className.includes('text-black') &&          // 평점(검은색) 아님
-                                /^\d+$/.test(el.innerText.trim())                // 오직 숫자만 있어야 함 (예: "254")
-                            );
-                            if (likeEl) {
-                                likeCnt = parseInt(likeEl.innerText) || 0;
-                            }
+                            const likeEl = spans.find(el => el.className.includes('text-body_13px_med') && !el.className.includes('text-black') && /^\\d+$/.test(el.innerText.trim()));
+                            if (likeEl) likeCnt = parseInt(likeEl.innerText) || 0;
 
                             return {
                                 title: getMeta('og:title'),
@@ -139,7 +152,6 @@ def scrape_musinsa():
 
                         price_int = int(extracted['price']) if extracted['price'] else 0
                         
-                        # ▼ [수정됨] 0 대신 실제 긁어온 값 넣기
                         data = {
                             "ranking": idx + 1,
                             "brand": extracted['brand'] if extracted['brand'] else "무신사",
@@ -148,16 +160,18 @@ def scrape_musinsa():
                             "img_url": extracted['img'],
                             "category": cat_name,
                             "link": item['href'],
-                            "like_count": extracted['like_count'],     # 실제 값
-                            "rating": extracted['rating'],             # 실제 값
-                            "review_count": extracted['review_count'], # 실제 값
-                            "view_count": 0  # 조회수는 수집 불가(보통 0)
+                            "like_count": extracted['like_count'],
+                            "rating": extracted['rating'],
+                            "review_count": extracted['review_count'],
+                            "view_count": 0
                         }
                         total_results.append(data)
-                        print(f"  - 수집성공: {data['title'][:10]}... (후기:{data['review_count']}개, 평점:{data['rating']})")
+                        
+                        if (idx + 1) % 10 == 0:
+                            print(f"     [{cat_name}] {idx + 1}/100 완료...")
 
                     except Exception as e:
-                        print(f"  - 개별 상품 에러: {e}")
+                        print(f"     X 개별 상품 에러: {e}")
             
             except Exception as e:
                 print(f"[{cat_name}] 카테고리 에러: {e}")
@@ -173,7 +187,6 @@ def init_db():
             print(f">> DB 접속 시도 중... (남은 시도: {retries})")
             conn = pymysql.connect(**db_config)
             cursor = conn.cursor()
-            
             create_table_sql = """
             CREATE TABLE IF NOT EXISTS musinsa_item (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -193,66 +206,42 @@ def init_db():
             """
             cursor.execute(create_table_sql)
             conn.commit()
-            print(">> ✅ DB 연결 및 테이블 확인 완료! (성공)")
+            print(">> ✅ DB 연결 완료!")
             conn.close()
             return
-            
-        except pymysql.err.OperationalError as e:
-            print(f"   ⏳ DB 부팅 대기 중... 3초 뒤 재시도. (에러코드: {e.args[0]})")
-            time.sleep(3)
-            retries -= 1
-            
         except Exception as e:
-            print(f"❌ 예상치 못한 에러: {e}")
+            print(f"   ⏳ DB 대기 중... ({e})")
             time.sleep(3)
             retries -= 1
-            
-    print("❌❌ DB 접속 최종 실패. 도커 로그를 확인해주세요.")
     sys.exit(1)
 
 def save_to_db(items):
-    if not items:
-        print("저장할 데이터가 없습니다.")
-        return
-
+    if not items: return
     print(f"\n>> DB 저장 시작 ({len(items)}개)...")
-    
     conn = None
     try:
         conn = pymysql.connect(**db_config)
         cursor = conn.cursor()
-
         sql = """
             INSERT INTO musinsa_item 
             (title, brand, price, img_url, category, link, ranking, like_count, rating, review_count, view_count) 
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-
         for item in items:
             cursor.execute(sql, (
-                item['title'], 
-                item['brand'], 
-                item['price'], 
-                item['img_url'], 
-                item['category'],
-                item.get('link', '#'),
-                item['ranking'],
-                item['like_count'],
-                item['rating'],
-                item['review_count'],
-                item['view_count']
+                item['title'], item['brand'], item['price'], item['img_url'], 
+                item['category'], item.get('link', '#'), item['ranking'],
+                item['like_count'], item['rating'], item['review_count'], item['view_count']
             ))
-        
         conn.commit()
-        print(">> ✅ DB 저장 진짜 완료!")
-        
+        print(f">> ✅ DB 저장 완료!")
     except Exception as e:
-        print(f"❌ DB 저장 중 에러 발생: {e}")
+        print(f"❌ 저장 에러: {e}")
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 if __name__ == "__main__":
+    # 혹시 이 파일을 직접 실행할 때를 대비해 둠
     init_db()
     crawled_data = scrape_musinsa()
     save_to_db(crawled_data)

@@ -65,8 +65,8 @@
     // [수정 전] const API_URL = "http://localhost:8080/musinsa/ranking";
     // 👇 [수정 후] 
     // 화면은 자바(8080)가 보여주지만, 데이터는 도커(8000)한테 받아와야 합니다!
-    const API_URL = "http://localhost:8000/api/items";       // 데이터 조회
-    const CRAWL_URL = "http://localhost:8000/api/crawl/run"; // 크롤링 요청
+const API_URL = "http://localhost:8000/api/items"; 
+const CRAWL_URL = "http://localhost:8000/api/crawl/run";
 
         async function loadItems() {
             try {

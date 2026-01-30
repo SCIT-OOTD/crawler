@@ -1,48 +1,31 @@
 package net.datasa.crawling.musinsa.controller;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.List;
-
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
+import org.springframework.util.StreamUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import lombok.RequiredArgsConstructor;
-import net.datasa.crawling.musinsa.entity.MusinsaItem;
-import net.datasa.crawling.musinsa.service.MusinsaService;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 @RestController
 @RequestMapping("/musinsa")
-@RequiredArgsConstructor
 public class MusinsaController {
 
-    private final MusinsaService musinsaService;
-
-    // 1. 크롤링 버튼
-    @GetMapping("/crawl")
-    public String doCrawl() {
-        musinsaService.crawlAndSave();
-        return "<h3>크롤링 완료!</h3><br><a href='/musinsa/view'>👉 화면 보러가기</a>";
-    }
-
-    // 2. 데이터 조회 (JSON)
-    @GetMapping("/ranking")
-    public List<MusinsaItem> showRanking() {
-        return musinsaService.getItems();
-    }
-
-    // 3. HTML 화면 띄우기 (무조건 성공하는 코드)
-    // 접속 주소: http://localhost:8080/musinsa/view
+    // 접속 주소: http://localhost:9999/musinsa/view
     @GetMapping(value = "/view", produces = MediaType.TEXT_HTML_VALUE)
     public String showHtml() {
         try {
-            // 프로젝트 최상위 폴더(pom.xml 옆)에 있는 index.html을 읽음
-            return Files.readString(Paths.get("index.html"));
+            // 👇 [핵심 변경] 이미지를 보니 'templates' 폴더 안에 있습니다.
+            // static -> templates 로 단어만 바꿨습니다.
+            ClassPathResource resource = new ClassPathResource("templates/index.html");
+            
+            // 파일이 존재하면 읽어서 글자(HTML)로 돌려줍니다.
+            return StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            return "<h1>index.html 파일이 없습니다. pom.xml 옆에 두셨나요?</h1>";
+            return "<h1>에러! templates 폴더 안에 index.html 파일을 못 찾겠어요.</h1><br>" + e.getMessage();
         }
     }
 }
